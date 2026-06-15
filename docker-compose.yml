@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Type 3 — Grad + Weight exchange every SYNC_EVERY batches
+#
+#  Topology
+#  ────────
+#    master   — parameter server: averages weights AND gradients at sync points
+#    worker-0 — trains on MNIST shard 0  (samples 0 – 29 999)
+#    worker-1 — trains on MNIST shard 1  (samples 30 000 – 59 999)
+#
+#  Per sync-point flow (every SYNC_EVERY batches)
+#  ───────────────────────────────────────────────
+#    STEP A: worker → send weights → master averages → send back → model reset
+#    STEP B: worker → send grads  → master averages → send back → extra step
+#
+#  Non-sync batches: local forward + backward + step, no master communication
+#
+#  Usage
+#  ─────
+#    docker compose up --build
+#
+#    Override any hyperparameter without rebuilding:
+#      SYNC_EVERY=10 NUM_EPOCHS=5 LR=0.005 docker compose up --build
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile.master
+    container_name: master
+    environment:
+      MASTER_PORT: "29500"
+      NUM_WORKERS: "2"
+      NUM_EPOCHS:  "${NUM_EPOCHS:-3}"
+    ports:
+      - "29500:29500"           # expose for debugging; not required internally
+    networks:
+      - train_net
+
+  worker-0:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: worker-0
+    depends_on:
+      - master
+    environment:
+      WORKER_ID:   "0"
+      MASTER_HOST: "master"
+      MASTER_PORT: "29500"
+      NUM_EPOCHS:  "${NUM_EPOCHS:-3}"
+      BATCH_SIZE:  "${BATCH_SIZE:-64}"
+      LR:          "${LR:-0.01}"
+      MOMENTUM:    "${MOMENTUM:-0.9}"
+      SYNC_EVERY:  "${SYNC_EVERY:-10}"
+    networks:
+      - train_net
+
+  worker-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: worker-1
+    depends_on:
+      - master
+    environment:
+      WORKER_ID:   "1"
+      MASTER_HOST: "master"
+      MASTER_PORT: "29500"
+      NUM_EPOCHS:  "${NUM_EPOCHS:-3}"
+      BATCH_SIZE:  "${BATCH_SIZE:-64}"
+      LR:          "${LR:-0.01}"
+      MOMENTUM:    "${MOMENTUM:-0.9}"
+      SYNC_EVERY:  "${SYNC_EVERY:-10}"
+    networks:
+      - train_net
+
+networks:
+  train_net:
+    driver: bridge

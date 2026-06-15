@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# Pre-download MNIST so workers don't race on download at startup
+RUN python -c "from torchvision import datasets, transforms; t = transforms.ToTensor(); datasets.MNIST('/tmp/mnist', train=True, download=True, transform=t); datasets.MNIST('/tmp/mnist', train=False, download=True, transform=t); print('MNIST cached.')"
+
+# Copy shared modules and worker script
+COPY comm.py   ./comm.py
+COPY model.py  ./model.py
+COPY worker.py ./worker.py
+
+ENV MASTER_HOST=master  \
+    MASTER_PORT=29500   \
+    NUM_EPOCHS=3        \
+    BATCH_SIZE=64       \
+    LR=0.01             \
+    MOMENTUM=0.9        \
+    MNIST_ROOT=/tmp/mnist
+
+# WORKER_ID must be provided at runtime (0 or 1)
+CMD ["python", "worker.py"]

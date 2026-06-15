@@ -1,0 +1,18 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# Copy shared modules and master script
+COPY comm.py  ./comm.py
+COPY master.py ./master.py
+
+ENV MASTER_PORT=29500 \
+    NUM_WORKERS=2     \
+    NUM_EPOCHS=3
+
+EXPOSE 29500
+
+CMD ["python", "master.py"]
