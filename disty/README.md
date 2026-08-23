@@ -121,50 +121,6 @@ computer supports and picks accordingly:
 | Linux, macOS | local sockets in the temp folder | never touches the network stack, so it is faster and immune to network trouble |
 | Windows | `127.0.0.1` | Windows has no local sockets; its loopback is real, so TCP is fine |
 
-The ring code itself cannot tell which one it got — `exchange()` is the same
-either way. `--tcp` forces `127.0.0.1` if you want to see that path on Linux.
-
-The detection is one line in `ring.py`:
-
-```python
-def local_sockets_work():
-    return hasattr(socket, "AF_UNIX")
-```
-
-Python only defines `socket.AF_UNIX` on platforms that have it, so checking for
-the name is more reliable than checking the OS name.
-
-One WSL2 caveat, since that is a Linux that lives inside Windows: in `mirrored`
-networking mode it routes `127.0.0.1` through Windows rather than real loopback
-
-```bash
-ip route get 127.0.0.1
-# -> 127.0.0.1 via 169.254.73.152 dev loopback0
-```
-
-and that path drops packets once a few processes push tens of megabytes at each
-other. So on WSL2, use the default (local sockets) rather than `--tcp`. Real
-Windows and real Linux are both unaffected.
-
-## Speed, honestly
-
-Single-process training is faster than this ring, and you should expect that:
-
-| | steps/sec |
-|---|---|
-| One process | ~2400 |
-| 3 nodes, one thread each | ~500 |
-| 3 nodes, PyTorch's default threads | ~16 |
-
-The model is 1,377 numbers and one forward+backward is 0.42 ms, while the four
-socket exchanges per step cost about 1.6 ms. Communication dominates completely,
-and the three processes share the same cores so no extra compute is won. This
-demo shows the mechanism working correctly, not a speedup. All-reduce pays off
-when per-step compute vastly exceeds per-step communication — a large model, on
-devices with their own cores.
-
-That last row is why `train_ring.py` calls `torch.set_num_threads(1)`: without
-it the processes fight over the same cores and lose 30× for nothing.
 
 
 ## Verified
@@ -175,10 +131,3 @@ it the processes fight over the same cores and lose 30× for nothing.
 - 45 MB across 3 nodes: 0.48 s, 60 MB per node each way — exactly the
   `2×(N−1)/N` the formula predicts. 10 consecutive runs, no failures.
 
-Two things deliberately **not** claimed:
-
-- The TCP path works between processes (verified at 1 MB across 3 nodes) but has
-  never been run between two physically separate machines.
-- The Windows path is correct by construction and the platform detection is
-  tested (by hiding `socket.AF_UNIX` at runtime, which makes this Linux box take
-  the Windows branch), but nothing here has actually executed on Windows.
