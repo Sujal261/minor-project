@@ -166,15 +166,6 @@ devices with their own cores.
 That last row is why `train_ring.py` calls `torch.set_num_threads(1)`: without
 it the processes fight over the same cores and lose 30× for nothing.
 
-## What are `.gitignore` and `__pycache__`?
-
-Nothing you wrote and nothing you need. When Python imports a file it saves a
-pre-chewed copy next to it in `__pycache__/` so the next import is faster. It is
-generated automatically, it is per-Python-version, and it is rebuilt whenever
-you change the source — so committing it is pointless and it can even confuse
-someone on a different Python. `.gitignore` is a plain list of names for git to
-ignore, and it is there precisely so `__pycache__` never gets pushed. You can
-delete `__pycache__` any time; Python will just make it again.
 
 ## Verified
 
