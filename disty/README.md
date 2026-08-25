@@ -184,10 +184,53 @@ delete `__pycache__` any time; Python will just make it again.
 - 45 MB across 3 nodes: 0.48 s, 60 MB per node each way — exactly the
   `2×(N−1)/N` the formula predicts. 10 consecutive runs, no failures.
 
+Run on **real Windows** (Python 3.12.10, torch 2.13.0+cpu,
+`sys.platform == 'win32'`), not just Linux:
+
+- `hasattr(socket, "AF_UNIX")` is `False` there, so it took the TCP branch by
+  itself and reported `talking over 127.0.0.1 (TCP)`. No flags given.
+- Correctness suite clean at 2, 3, 5 and 7 nodes — 20/55/77 PASS, zero FAIL.
+- 45 MB across 3 nodes over TCP: clean, 60 MB per node each way, 44 MB/s. This
+  is the exact case WSL2 could not survive, which is the whole point — real
+  Windows has real loopback.
+- `train_ring.py` gradient check PASS (1.11e-16) and `trace_ring.py` matches the
+  hand-worked `[3, 6, 4, 8, 3, 4]`.
+
+**A genuinely mixed ring works.** Ranks 0 and 1 on Windows Python, rank 2 on
+Linux Python, same `127.0.0.1` ring: 30 PASS, zero FAIL. The wire format is
+byte-identical across the two — both little-endian, both 8-byte doubles:
+
+```
+Linux  : byteorder little  itemsize 8  1.5,-2.25 -> 000000000000f83f00000000000002c0
+Windows: byteorder little  itemsize 8  1.5,-2.25 -> 000000000000f83f00000000000002c0
+```
+
+## One real caveat for mixed devices
+
+`build_model()` relies on `torch.manual_seed(1234)` giving every node identical
+starting weights. That holds when every node runs the **same PyTorch version**,
+and it is not guaranteed when they don't. Measured, same seed, same code:
+
+```
+torch 2.12.1 (Linux)  : -0.069368191063404083
+torch 2.13.0 (Windows): -0.069368183612823486
+```
+
+Those are adjacent float32 values, 1 ULP apart — the versions compute `Linear`'s
+initialiser slightly differently. Averaging gradients keeps nodes in step only if
+they *started* in step, so mismatched initial weights mean the nodes are training
+subtly different models from step 0.
+
+For one machine, or several machines with identical PyTorch, this never bites. To
+be safe on genuinely mixed devices, don't trust the seed — have rank 0 send its
+weights round the ring once before training and have everyone adopt them.
+`all_reduce` already does exactly the right thing if you reduce rank 0's weights
+with everyone else's zeroed, or just reduce all the weights and divide by N.
+
 Two things deliberately **not** claimed:
 
-- The TCP path works between processes (verified at 1 MB across 3 nodes) but has
-  never been run between two physically separate machines.
-- The Windows path is correct by construction and the platform detection is
-  tested (by hiding `socket.AF_UNIX` at runtime, which makes this Linux box take
-  the Windows branch), but nothing here has actually executed on Windows.
+- The TCP path has never been run between two physically separate machines. Same
+  code, but a real network is not the same as loopback.
+- macOS has not been tested at all. It is POSIX with `AF_UNIX` and
+  little-endian, so it takes the same branch Linux does, but that is reasoning
+  rather than evidence.
