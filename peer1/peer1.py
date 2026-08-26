@@ -10,17 +10,21 @@ BUFFER = 4096
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 9999
 
-PEER_IP = "127.0.0.1"
-PEER_LPORT = 37000
-HEARTBEAT_PORT = 12000
+WORKER_IP = "127.0.0.1"
+LISTENING_PORT = 37000
+DATASET_PORT = 12000
 FAULT_PORT = 20000
 
 PEER_INFO = b'\x00'
 PEER_INQUIRY = b'\xff'
-FILE_DOWNLOAD = b'\xaa'
-FILE_CONTENT = b'\x77'
+DATASET_DOWNLOAD = b'\xaa'
+DATASET_CONTENT = b'\x77'
 START = b'\xcc'
 PEER_ALIVE = b'\xbb'
+
+#initially the addresses are empty
+send_to_addr = (0, 0)
+recv_from_addr = (0, 0)
 
 def recieve_data(peer_conn, message_size):
     message = b""
@@ -47,7 +51,7 @@ def recieve_data(peer_conn, message_size):
 
 def start_listen():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_socket:
-        peer_socket.bind((PEER_IP, FAULT_PORT))
+        peer_socket.bind((WORKER_IP, FAULT_PORT))
         peer_socket.listen()
 
         while True:    
@@ -75,32 +79,54 @@ def start_listen():
 
             node_conn.close()
 
+#for gradient transfer
+def listen_from_worker():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as worker_socket:
+        worker_socket.bind(WORKER_IP, LISTENING_PORT)
+        worker_socket.listen()
+
+        node_conn, node_addr = worker_socket.accept()
+
+        if node_addr[0] != recv_from_addr[0]:
+            node_conn.close()
+
+        #if its the connection that is actually needed then we do the file transfer stuffs
+        message = node_conn.recv(7)
+        print(message.decode('utf-8'))
+
+def send_to_worker():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as worker_socket:
+        worker_socket.connect(send_to_addr)
+
+        # send the the stuffs needed to be sent
+        worker_socket.sendall(b"GRADIENT")
+
+# Hello packet to indicate that the worker is still alive
 def hello_packet_fn():
     while True:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_socket:
-            peer_socket.bind((PEER_IP, 0))
+            peer_socket.bind((WORKER_IP, 0))
             peer_socket.connect((SERVER_IP, SERVER_PORT))
             peer_socket.sendall(PEER_ALIVE)
         
         time.sleep(10)
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_socket:
-    peer_socket.bind((PEER_IP, 0))
+    peer_socket.bind((WORKER_IP, 0))
     peer_socket.connect((SERVER_IP, SERVER_PORT))
 
     # sending peer_info packet
-    message = struct.pack("!HH", PEER_LPORT, FAULT_PORT)
+    message = struct.pack("!HH", LISTENING_PORT, FAULT_PORT)
     message_size = len(message)
     
     header = struct.pack("!cI", PEER_INFO, message_size)
     peer_socket.sendall(header + message)
 
 
-    #after initial setup the peer should listen for reqs as well so createing a thread for that
-    start_listening_thread = threading.Thread(target=start_listen)
-    # listening_thread.daemon = True
-    start_listening_thread.start()
+#after initial setup the peer should listen for reqs as well so createing a thread for that
+start_listening_thread = threading.Thread(target=start_listen)
+start_listening_thread.start()
 
-    #hello packet sending thread
-    hello_thread = threading.Thread(target=hello_packet_fn)
-    hello_thread.start()
+#hello packet sending thread
+hello_thread = threading.Thread(target=hello_packet_fn)
+hello_thread.start()

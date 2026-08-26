@@ -37,21 +37,23 @@ class Worker:
 peer_list = []
 peer_list_lock = threading.Lock()
 
-def peer_alive_check():
+#Checking if the workers are alive or not
+def worker_alive_check():
     curr_time = time.time()
     survivors = []
     for peer in peer_list:
-        if curr_time - peer.last_update_time < 30.0:
+        if curr_time - peer.last_update_time < 20.0:
             survivors.append(peer)
 
     if len(peer_list) != len(survivors):
         peer_list[:] = survivors
+        print(peer_list)
         ring_formation(peer_list)
 
-def peer_alive_check_thread_fn():
+def worker_alive_check_thread_fn():
     while True:
-        peer_alive_check()
-        time.sleep(10)
+        worker_alive_check()
+        time.sleep(5)
 
 #when start is initiated then this func is called
 def ring_formation(peer_list):
@@ -78,19 +80,14 @@ def ring_formation(peer_list):
             
             ring_socket.sendall(message)
 
-def exit_thread_fn():
-    while True:
-        command = input("$ ")
-        if "exit" in command:
-            os._exit(0)
 
-def recieve_data(peer_conn, message_size):
+def recieve_data(worker_conn, message_size):
     message = b""
     temp_msg_size = message_size
     recv_size = BUFFER
     while True:
         if temp_msg_size <= min(temp_msg_size, BUFFER):
-            message_frag = peer_conn.recv(temp_msg_size)
+            message_frag = worker_conn.recv(temp_msg_size)
             recv_size = len(message_frag)
             message += message_frag
 
@@ -99,39 +96,39 @@ def recieve_data(peer_conn, message_size):
                 continue
             break
             
-        message_frag = peer_conn.recv(BUFFER)
+        message_frag = worker_conn.recv(BUFFER)
         recv_size = len(message_frag)
         message += message_frag
         temp_msg_size -= recv_size
 
     return message
 
-def find_peer_by_ip(peer_addr):
+def find_peer_by_ip(worker_addr):
     for peer in peer_list:
-        if peer.ip_addr == peer_addr[0]:
+        if peer.ip_addr == worker_addr[0]:
             return peer
     return None
 
-def peer_thread_function(peer_conn, peer_addr):
-    with peer_conn:
-        packet_status = peer_conn.recv(1)
+def peer_thread_function(worker_conn, worker_addr):
+    with worker_conn:
+        packet_status = worker_conn.recv(1)
         
-        # message_str = recieve_data(peer_conn, message_size)
+        # message_str = recieve_data(worker_conn, message_size)
 
         if packet_status == PEER_ALIVE:
             new_time = time.time()
             
-            curr_peer = find_peer_by_ip(peer_addr)
+            curr_peer = find_peer_by_ip(worker_addr)
 
             if curr_peer != None:
                 curr_peer.last_update_time = new_time
 
         if packet_status == PEER_INFO:
-            message_size, = struct.unpack('!I', peer_conn.recv(4))
-            listening_port, fault_port = struct.unpack('!HH', peer_conn.recv(message_size))
+            message_size, = struct.unpack('!I', worker_conn.recv(4))
+            listening_port, fault_port = struct.unpack('!HH', worker_conn.recv(message_size))
 
             peer_info = Worker(
-                ip_addr=peer_addr[0], 
+                ip_addr=worker_addr[0], 
                 listening_port=listening_port, 
                 fault_port = fault_port,
                 last_update_time= time.time()
@@ -156,30 +153,35 @@ def peer_thread_function(peer_conn, peer_addr):
         #     dpeer_details_b = dpeer_details.encode('utf-8')
 
         #     header = PEER_INFO + len(dpeer_details_b).to_bytes(4, byteorder='big')
-        #     peer_conn.sendall(header + dpeer_details_b)
+        #     worker_conn.sendall(header + dpeer_details_b)
 
-def start_func():
+def cli_thread_fn():
     while True:
         command = input("$ ")
         if "start" in command:
             ring_formation(peer_list)
 
+        if "exit" in command:
+            os._exit(0)
+
 # exit_thread = threading.Thread(target=exit_thread_fn)
 # exit_thread.start()
 
-start_thread = threading.Thread(target=start_func)
-start_thread.start()
+#command line input to start the training and to exit the server process
+cli_thread = threading.Thread(target=cli_thread_fn)
+cli_thread.start()
 
-peer_alive_check_thread = threading.Thread(target=peer_alive_check_thread_fn)
-peer_alive_check_thread.start()
+#thread to check if the workers are alive or not
+worker_alive_check_thread = threading.Thread(target=worker_alive_check_thread_fn)
+worker_alive_check_thread.start()
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
     server_socket.bind((HOST, PORT))
     server_socket.listen()
 
     while True:
-        peer_conn, peer_addr = server_socket.accept()
+        worker_conn, worker_addr = server_socket.accept()
 
-        peer_thread = threading.Thread(target=peer_thread_function, args=(peer_conn, peer_addr))
+        peer_thread = threading.Thread(target=peer_thread_function, args=(worker_conn, worker_addr))
         peer_thread.start()
     
