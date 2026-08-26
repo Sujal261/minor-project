@@ -2,18 +2,19 @@
 
 Distributed gradient averaging, written from scratch in plain Python so you can
 read every part of it. No `torch.distributed`, no NCCL, no MPI — just sockets,
-`array('d')`, and two loops.
+one numpy array, and two loops.
 
 ## What you need
 
-Python 3 and PyTorch. Nothing else — no `torch.distributed`, no MPI, no NCCL.
+Python 3, PyTorch and numpy. Nothing else — no `torch.distributed`, no MPI, no
+NCCL.
 
 ```bash
-pip install torch
+pip install torch numpy
 ```
 
-`run.py` and `launch_local.py` don't even need PyTorch; only `train_ring.py` and
-`trace_ring.py` do.
+`run.py` and `launch_local.py` don't even need PyTorch; only the training
+scripts do.
 
 ## Run it
 
@@ -60,6 +61,9 @@ you launch with `--rank 1` is rank 1.
 | `trace_ring.py` | The same thing with a six-number gradient, printing every value at every step. Read this first. |
 | `run.py` | Correctness tests, ending with a 45 MB transfer. |
 | `launch_local.py` | Starts N processes on this machine so you can try it without N machines. |
+| `data_mnist.py` | Loads the MNIST subset in `mnist_subset.npz`. No downloading, no torchvision. |
+| `train_mnist.py` | The same ring training a 269,322-number model on real MNIST digits. The one to show. |
+| `baseline_mnist.py` | The identical training with no ring at all, for comparing against. |
 
 ## How it works, in short
 

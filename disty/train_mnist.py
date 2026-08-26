@@ -42,6 +42,7 @@ there is never a remainder to deal with.
 import argparse
 import time
 
+import numpy as np
 import torch
 
 import allreduce
@@ -79,27 +80,38 @@ def build_model():
 
 def gather_gradients(model):
     """
-    Copy every gradient in the model into one flat list of plain floats.
-    Identical to train_ring.py - the order is whatever model.parameters()
-    gives, and every node builds the same model, so every node produces the
-    same order. That is the entire protocol.
+    Copy every gradient in the model into one flat numpy array.
+
+    The order is whatever model.parameters() gives, and every node builds the
+    same model, so every node produces the same order. That is the entire
+    protocol - there is no header saying which number is which.
+
+    .numpy() on a float64 CPU tensor is a view, not a copy: it hands back the
+    same memory with a numpy label on it. np.concatenate then does one memcpy
+    into a fresh array. Compare that with .tolist(), which would have to build
+    269,322 separate Python float objects every single step.
     """
-    flat = []
-    for parameter in model.parameters():
-        flat.extend(parameter.grad.reshape(-1).tolist())
-    return flat
+    return np.concatenate(
+        [parameter.grad.detach().reshape(-1).numpy()
+         for parameter in model.parameters()])
 
 
 def scatter_gradients(model, flat):
-    """The exact reverse of gather_gradients."""
+    """
+    The exact reverse of gather_gradients.
+
+    torch.from_numpy is also a view rather than a copy, so the only real work
+    here is grad.copy_(), which is a compiled memcpy. Building a torch tensor
+    out of a Python list instead would mean reading every float object back out
+    one at a time.
+    """
     at = 0
     for parameter in model.parameters():
         count = parameter.grad.numel()
         piece = flat[at:at + count]
         at += count
         parameter.grad.copy_(
-            torch.tensor(piece, dtype=parameter.grad.dtype)
-            .reshape(parameter.grad.shape))
+            torch.from_numpy(piece).reshape(parameter.grad.shape))
     if at != len(flat):
         raise ValueError(f"had {len(flat)} numbers but the model wanted {at}")
 
@@ -221,8 +233,8 @@ def main():
             # match the gradient one machine gets from the whole global batch?
             if step == 0:
                 wanted = whole_batch_gradient(global_x, global_y)
-                worst = max(abs(a - b) for a, b in zip(averaged, wanted))
-                biggest = max(abs(b) for b in wanted)
+                worst = float(np.abs(averaged - wanted).max())
+                biggest = float(np.abs(wanted).max())
                 if worst < 1e-12:
                     say(f"PASS  ring gradient matches the whole-batch "
                         f"gradient over all {global_batch} rows")
