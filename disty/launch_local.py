@@ -52,6 +52,14 @@ def main():
                         help="passed to run.py: size of the big test")
     parser.add_argument("--steps", type=int, default=None,
                         help="passed to train_ring.py: number of steps")
+    parser.add_argument("--batch", type=int, default=None,
+                        help="passed to the training script: rows per node")
+    parser.add_argument("--lr", type=float, default=None,
+                        help="passed to the training script: learning rate")
+    parser.add_argument("--threads", type=int, default=None,
+                        help="passed to train_mnist.py: PyTorch threads per "
+                             "node. Leave alone when several nodes share one "
+                             "machine; its own default of 1 is what you want.")
     args = parser.parse_args()
 
     # Build the peers list. Position in the list is the rank, and every node
@@ -90,6 +98,14 @@ def main():
             command += ["--big-mb", str(args.big_mb)]
         if args.steps is not None:
             command += ["--steps", str(args.steps)]
+        # Only forwarded when actually given, so every script keeps its own
+        # default when the flag is left off.
+        if args.batch is not None:
+            command += ["--batch", str(args.batch)]
+        if args.lr is not None:
+            command += ["--lr", str(args.lr)]
+        if args.threads is not None:
+            command += ["--threads", str(args.threads)]
         processes.append(subprocess.Popen(command))
 
     # Wait for them all to finish and collect their exit codes.
